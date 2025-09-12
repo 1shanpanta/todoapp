@@ -76,6 +76,7 @@ function App() {
     }
   }, [preferences]);
 
+
   const generateId = () => {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   };
@@ -120,7 +121,7 @@ function App() {
     setPreferences(prev => ({ ...prev, hideCompleted: !prev.hideCompleted }));
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       addTask();
     }
@@ -183,7 +184,7 @@ function App() {
                       type="text"
                       value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
-                      onKeyPress={handleKeyPress}
+                      onKeyDown={handleKeyDown}
                       placeholder="Add a task and press Enter…"
                       className="w-full bg-transparent outline-none placeholder:text-white/40 text-sm sm:text-base"
                       autoComplete="off"
