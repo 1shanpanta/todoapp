@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  CheckSquare, 
-  Plus, 
-  ListFilter, 
-  Lock, 
-  Trash2, 
-  SortDesc, 
-  SortAsc, 
-  EyeOff, 
-  Eye, 
-  Circle, 
-  Check, 
-  X 
+import {
+  CheckSquare,
+  Plus,
+  ListFilter,
+  Lock,
+  Trash2,
+  SortDesc,
+  SortAsc,
+  EyeOff,
+  Eye,
+  Circle,
+  Check,
+  X,
+  Edit
 } from 'lucide-react';
 
 interface Task {
@@ -38,7 +39,10 @@ function App() {
     hideCompleted: false
   });
   const [inputValue, setInputValue] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const editInputRef = useRef<HTMLInputElement>(null);
 
   // Load data from localStorage on mount
   useEffect(() => {
@@ -109,6 +113,30 @@ function App() {
     setTasks(prev => prev.filter(task => task.id !== taskId));
   };
 
+  const startEditTask = (taskId: string, currentText: string) => {
+    setEditingId(taskId);
+    setEditValue(currentText);
+    setTimeout(() => editInputRef.current?.focus(), 0);
+  };
+
+  const saveEditTask = (taskId: string) => {
+    const trimmedText = editValue.trim();
+    if (!trimmedText) return;
+
+    setTasks(prev =>
+      prev.map(task =>
+        task.id === taskId ? { ...task, text: trimmedText } : task
+      )
+    );
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+
   const clearCompleted = () => {
     setTasks(prev => prev.filter(task => !task.done));
   };
@@ -124,6 +152,14 @@ function App() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       addTask();
+    }
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent, taskId: string) => {
+    if (e.key === 'Enter') {
+      saveEditTask(taskId);
+    } else if (e.key === 'Escape') {
+      cancelEdit();
     }
   };
 
@@ -150,9 +186,9 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-white antialiased">
-      <main className="min-h-full">
-        <section className="mx-auto w-full max-w-[720px] px-4 sm:px-5 md:px-6 py-10">
+    <div className="min-h-screen h-full bg-neutral-950 text-white antialiased">
+      <main className="min-h-screen h-full">
+        <section className="mx-auto w-full max-w-[720px] px-4 sm:px-5 md:px-6 py-10 min-h-screen flex flex-col justify-center">
           {/* Header */}
           <header className="w-full">
             <div className="flex items-baseline gap-3">
@@ -229,13 +265,26 @@ function App() {
 
                             {/* Text */}
                             <div className="min-w-0 flex-1">
-                              <p className={`text-sm sm:text-base line-clamp-2 transition-colors ${
-                                task.done 
-                                  ? 'line-through text-white/40' 
-                                  : 'text-white/90'
-                              }`}>
-                                {task.text}
-                              </p>
+                              {editingId === task.id ? (
+                                <input
+                                  ref={editInputRef}
+                                  type="text"
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onKeyDown={(e) => handleEditKeyDown(e, task.id)}
+                                  onBlur={() => saveEditTask(task.id)}
+                                  className="w-full bg-transparent outline-none text-sm sm:text-base text-white/90 border-b border-white/20 focus:border-white/40 transition-colors"
+                                  autoComplete="off"
+                                />
+                              ) : (
+                                <p className={`text-sm sm:text-base line-clamp-2 transition-colors ${
+                                  task.done
+                                    ? 'line-through text-white/40'
+                                    : 'text-white/90'
+                                }`}>
+                                  {task.text}
+                                </p>
+                              )}
                             </div>
 
                             {/* Timestamp */}
@@ -243,10 +292,20 @@ function App() {
                               {formatDate(task.timestamp)}
                             </time>
 
+                            {/* Edit Button */}
+                            <button
+                              onClick={() => startEditTask(task.id, task.text)}
+                              className="shrink-0 opacity-70 hover:opacity-100 transition-opacity"
+                              title="Edit task"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+
                             {/* Delete Button */}
                             <button
                               onClick={() => deleteTask(task.id)}
                               className="ml-2 shrink-0 opacity-70 hover:opacity-100 transition-opacity"
+                              title="Delete task"
                             >
                               <X className="h-4 w-4" />
                             </button>
