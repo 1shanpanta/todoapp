@@ -12,14 +12,31 @@ import {
   Circle,
   Check,
   X,
-  Edit
+  Edit,
+  Grip
 } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface Task {
   id: string;
   text: string;
   done: boolean;
   timestamp: number;
+  order: number;
 }
 
 interface Preferences {
@@ -28,9 +45,138 @@ interface Preferences {
 }
 
 const STORAGE_KEYS = {
-  ITEMS: 'todo_items_v1',
+  ITEMS: 'todo_items_v2',
   PREFS: 'todo_prefs_v1'
 };
+
+interface SortableTaskProps {
+  task: Task;
+  editingId: string | null;
+  editValue: string;
+  setEditValue: (value: string) => void;
+  editInputRef: React.RefObject<HTMLInputElement>;
+  toggleTask: (id: string) => void;
+  startEditTask: (id: string, text: string) => void;
+  saveEditTask: (id: string) => void;
+  handleEditKeyDown: (e: React.KeyboardEvent, id: string) => void;
+  deleteTask: (id: string) => void;
+  formatDate: (timestamp: number) => string;
+}
+
+function SortableTask({
+  task,
+  editingId,
+  editValue,
+  setEditValue,
+  editInputRef,
+  toggleTask,
+  startEditTask,
+  saveEditTask,
+  handleEditKeyDown,
+  deleteTask,
+  formatDate
+}: SortableTaskProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging
+  } = useSortable({ id: task.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1 : 0
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className="group w-full bg-transparent"
+    >
+      <div className="flex items-center gap-2 px-3 sm:px-4 py-3 hover:bg-white/2.5 transition-colors">
+        {/* Drag Handle */}
+        <button
+          {...attributes}
+          {...listeners}
+          className="shrink-0 cursor-grab active:cursor-grabbing touch-none"
+          title="Drag to reorder"
+        >
+          <Grip className="h-3 w-3 text-white/30 hover:text-white/50 transition-colors" />
+        </button>
+
+        {/* Custom Checkbox */}
+        <button
+          onClick={() => toggleTask(task.id)}
+          className={`toggle h-6 w-6 shrink-0 rounded-full ring-1 flex items-center justify-center transition-all hover:bg-white/10 ${
+            task.done 
+              ? 'bg-white/10 ring-white/30' 
+              : 'ring-white/15 bg-white/5'
+          }`}
+          aria-checked={task.done}
+          role="checkbox"
+        >
+          {task.done ? (
+            <Check className="h-3.5 w-3.5 text-white" />
+          ) : (
+            <Circle className="h-3.5 w-3.5 text-white/70" />
+          )}
+        </button>
+
+        {/* Text */}
+        <div className="min-w-0 flex-1">
+          {editingId === task.id ? (
+            <input
+              ref={editInputRef}
+              type="text"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={(e) => handleEditKeyDown(e, task.id)}
+              onBlur={() => saveEditTask(task.id)}
+              className="w-full bg-transparent outline-none text-sm sm:text-base text-white/90 border-b border-white/20 focus:border-white/40 transition-colors"
+              autoComplete="off"
+            />
+          ) : (
+            <p className={`text-sm sm:text-base line-clamp-2 transition-colors ${
+              task.done
+                ? 'line-through text-white/40'
+                : 'text-white/90'
+            }`}>
+              {task.text}
+            </p>
+          )}
+        </div>
+
+        {/* Timestamp */}
+        <time className="hidden sm:block text-xs text-white/40">
+          {formatDate(task.timestamp)}
+        </time>
+
+        {/* Edit Button */}
+        <button
+          onClick={() => startEditTask(task.id, task.text)}
+          className="shrink-0 opacity-70 hover:opacity-100 transition-opacity"
+          title="Edit task"
+        >
+          <Edit className="h-4 w-4" />
+        </button>
+
+        {/* Delete Button */}
+        <button
+          onClick={() => deleteTask(task.id)}
+          className="ml-2 shrink-0 opacity-70 hover:opacity-100 transition-opacity"
+          title="Delete task"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </li>
+  );
+}
 
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -44,40 +190,42 @@ function App() {
   const inputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8
+      }
+    })
+  );
+
   // Load data from localStorage on mount
   useEffect(() => {
-    try {
-      const savedTasks = localStorage.getItem(STORAGE_KEYS.ITEMS);
-      const savedPrefs = localStorage.getItem(STORAGE_KEYS.PREFS);
-      
-      if (savedTasks) {
-        setTasks(JSON.parse(savedTasks));
-      }
-      
-      if (savedPrefs) {
-        setPreferences(prev => ({ ...prev, ...JSON.parse(savedPrefs) }));
-      }
-    } catch (error) {
-      console.error('Failed to load from localStorage:', error);
+    const savedTasks = localStorage.getItem(STORAGE_KEYS.ITEMS);
+    const savedPrefs = localStorage.getItem(STORAGE_KEYS.PREFS);
+    
+    if (savedTasks) {
+      const parsed = JSON.parse(savedTasks);
+      // Migrate old tasks without order field
+      const migratedTasks = parsed.map((task: Task, index: number) => ({
+        ...task,
+        order: task.order ?? index
+      }));
+      setTasks(migratedTasks);
+    }
+    
+    if (savedPrefs) {
+      setPreferences(prev => ({ ...prev, ...JSON.parse(savedPrefs) }));
     }
   }, []);
 
   // Save tasks to localStorage whenever tasks change
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.ITEMS, JSON.stringify(tasks));
-    } catch (error) {
-      console.error('Failed to save tasks to localStorage:', error);
-    }
+    localStorage.setItem(STORAGE_KEYS.ITEMS, JSON.stringify(tasks));
   }, [tasks]);
 
   // Save preferences to localStorage whenever preferences change
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.PREFS, JSON.stringify(preferences));
-    } catch (error) {
-      console.error('Failed to save preferences to localStorage:', error);
-    }
+    localStorage.setItem(STORAGE_KEYS.PREFS, JSON.stringify(preferences));
   }, [preferences]);
 
 
@@ -93,10 +241,15 @@ function App() {
       id: generateId(),
       text: trimmedText,
       done: false,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      order: 0
     };
 
-    setTasks(prev => [newTask, ...prev]);
+    // Shift all existing orders down and add new task at top
+    setTasks(prev => [
+      newTask,
+      ...prev.map(t => ({ ...t, order: t.order + 1 }))
+    ]);
     setInputValue('');
     inputRef.current?.focus();
   };
@@ -163,15 +316,31 @@ function App() {
     }
   };
 
-  // Filter and sort tasks
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      setTasks(prev => {
+        const oldIndex = prev.findIndex(t => t.id === active.id);
+        const newIndex = prev.findIndex(t => t.id === over.id);
+        
+        const reordered = arrayMove(prev, oldIndex, newIndex);
+        // Update order field for all tasks
+        return reordered.map((task, index) => ({
+          ...task,
+          order: index
+        }));
+      });
+    }
+  };
+
+  // Filter and sort tasks by order
   const getSortedTasks = () => {
     let filteredTasks = preferences.hideCompleted 
       ? tasks.filter(task => !task.done)
       : tasks;
 
-    return filteredTasks.sort((a, b) => 
-      preferences.recentFirst ? b.timestamp - a.timestamp : a.timestamp - b.timestamp
-    );
+    return [...filteredTasks].sort((a, b) => a.order - b.order);
   };
 
   const sortedTasks = getSortedTasks();
@@ -241,78 +410,35 @@ function App() {
                       </p>
                     </div>
                   ) : (
-                    <ul className="divide-y divide-white/5">
-                      {sortedTasks.map((task) => (
-                        <li key={task.id} className="group w-full bg-transparent">
-                          <div className="flex items-center gap-3 px-3 sm:px-4 py-3 hover:bg-white/2.5 transition-colors">
-                            {/* Custom Checkbox */}
-                            <button
-                              onClick={() => toggleTask(task.id)}
-                              className={`toggle h-6 w-6 shrink-0 rounded-full ring-1 flex items-center justify-center transition-all hover:bg-white/10 ${
-                                task.done 
-                                  ? 'bg-white/10 ring-white/30' 
-                                  : 'ring-white/15 bg-white/5'
-                              }`}
-                              aria-checked={task.done}
-                              role="checkbox"
-                            >
-                              {task.done ? (
-                                <Check className="h-3.5 w-3.5 text-white" />
-                              ) : (
-                                <Circle className="h-3.5 w-3.5 text-white/70" />
-                              )}
-                            </button>
-
-                            {/* Text */}
-                            <div className="min-w-0 flex-1">
-                              {editingId === task.id ? (
-                                <input
-                                  ref={editInputRef}
-                                  type="text"
-                                  value={editValue}
-                                  onChange={(e) => setEditValue(e.target.value)}
-                                  onKeyDown={(e) => handleEditKeyDown(e, task.id)}
-                                  onBlur={() => saveEditTask(task.id)}
-                                  className="w-full bg-transparent outline-none text-sm sm:text-base text-white/90 border-b border-white/20 focus:border-white/40 transition-colors"
-                                  autoComplete="off"
-                                />
-                              ) : (
-                                <p className={`text-sm sm:text-base line-clamp-2 transition-colors ${
-                                  task.done
-                                    ? 'line-through text-white/40'
-                                    : 'text-white/90'
-                                }`}>
-                                  {task.text}
-                                </p>
-                              )}
-                            </div>
-
-                            {/* Timestamp */}
-                            <time className="hidden sm:block text-xs text-white/40">
-                              {formatDate(task.timestamp)}
-                            </time>
-
-                            {/* Edit Button */}
-                            <button
-                              onClick={() => startEditTask(task.id, task.text)}
-                              className="shrink-0 opacity-70 hover:opacity-100 transition-opacity"
-                              title="Edit task"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-
-                            {/* Delete Button */}
-                            <button
-                              onClick={() => deleteTask(task.id)}
-                              className="ml-2 shrink-0 opacity-70 hover:opacity-100 transition-opacity"
-                              title="Delete task"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <SortableContext
+                        items={sortedTasks.map(t => t.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <ul className="divide-y divide-white/5">
+                          {sortedTasks.map((task) => (
+                            <SortableTask
+                              key={task.id}
+                              task={task}
+                              editingId={editingId}
+                              editValue={editValue}
+                              setEditValue={setEditValue}
+                              editInputRef={editInputRef}
+                              toggleTask={toggleTask}
+                              startEditTask={startEditTask}
+                              saveEditTask={saveEditTask}
+                              handleEditKeyDown={handleEditKeyDown}
+                              deleteTask={deleteTask}
+                              formatDate={formatDate}
+                            />
+                          ))}
+                        </ul>
+                      </SortableContext>
+                    </DndContext>
                   )}
                 </div>
 
