@@ -246,21 +246,32 @@ function App() {
       order: 0
     };
 
-    // Shift all existing orders down and add new task at top
+    // Shift only active task orders down and add new task at top
     setTasks(prev => [
       newTask,
-      ...prev.map(t => ({ ...t, order: t.order + 1 }))
+      ...prev.map(t => t.done ? t : { ...t, order: t.order + 1 })
     ]);
     setInputValue('');
     inputRef.current?.focus();
   };
 
   const toggleTask = (taskId: string) => {
-    setTasks(prev => 
-      prev.map(task => 
-        task.id === taskId ? { ...task, done: !task.done } : task
-      )
-    );
+    setTasks(prev => {
+      const task = prev.find(t => t.id === taskId);
+      if (!task) return prev;
+
+      const newDone = !task.done;
+      const destinationTasks = prev.filter(t => t.done === newDone);
+      const maxOrder = destinationTasks.length > 0
+        ? Math.max(...destinationTasks.map(t => t.order))
+        : -1;
+
+      return prev.map(t =>
+        t.id === taskId
+          ? { ...t, done: newDone, order: maxOrder + 1 }
+          : t
+      );
+    });
   };
 
   const deleteTask = (taskId: string) => {
@@ -319,33 +330,42 @@ function App() {
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    
-    if (over && active.id !== over.id) {
-      setTasks(prev => {
-        const oldIndex = prev.findIndex(t => t.id === active.id);
-        const newIndex = prev.findIndex(t => t.id === over.id);
-        
-        const reordered = arrayMove(prev, oldIndex, newIndex);
-        // Update order field for all tasks
-        return reordered.map((task, index) => ({
-          ...task,
-          order: index
-        }));
-      });
-    }
+
+    if (!over || active.id === over.id) return;
+
+    setTasks(prev => {
+      const activeTask = prev.find(t => t.id === active.id);
+      const overTask = prev.find(t => t.id === over.id);
+
+      // Only allow reordering within the same group
+      if (!activeTask || !overTask || activeTask.done !== overTask.done) return prev;
+
+      const isDoneGroup = activeTask.done;
+      const groupTasks = prev.filter(t => t.done === isDoneGroup).sort((a, b) => a.order - b.order);
+      const otherTasks = prev.filter(t => t.done !== isDoneGroup);
+
+      const oldIndex = groupTasks.findIndex(t => t.id === active.id);
+      const newIndex = groupTasks.findIndex(t => t.id === over.id);
+
+      const reorderedGroup = arrayMove(groupTasks, oldIndex, newIndex).map((task, index) => ({
+        ...task,
+        order: index,
+      }));
+
+      return [...otherTasks, ...reorderedGroup];
+    });
   };
 
-  // Filter and sort tasks by order
-  const getSortedTasks = () => {
-    let filteredTasks = preferences.hideCompleted 
-      ? tasks.filter(task => !task.done)
-      : tasks;
+  // Split tasks into active and completed groups
+  const activeTasks = [...tasks]
+    .filter(task => !task.done)
+    .sort((a, b) => a.order - b.order);
 
-    return [...filteredTasks].sort((a, b) => a.order - b.order);
-  };
+  const completedTasks = [...tasks]
+    .filter(task => task.done)
+    .sort((a, b) => a.order - b.order);
 
-  const sortedTasks = getSortedTasks();
-  const completedCount = tasks.filter(task => task.done).length;
+  const completedCount = completedTasks.length;
   const totalCount = tasks.length;
 
   const formatDate = (timestamp: number) => {
@@ -401,7 +421,7 @@ function App() {
 
                 {/* Task List */}
                 <div className="w-full rounded-xl ring-1 ring-white/10 bg-neutral-900/50">
-                  {sortedTasks.length === 0 ? (
+                  {tasks.length === 0 ? (
                     <div className="px-4 sm:px-5 py-10 text-center">
                       <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10">
                         <ListFilter className="h-5 w-5 text-white/70" />
@@ -416,29 +436,68 @@ function App() {
                       collisionDetection={closestCenter}
                       onDragEnd={handleDragEnd}
                     >
-                      <SortableContext
-                        items={sortedTasks.map(t => t.id)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        <ul className="divide-y divide-white/5">
-                          {sortedTasks.map((task) => (
-                            <SortableTask
-                              key={task.id}
-                              task={task}
-                              editingId={editingId}
-                              editValue={editValue}
-                              setEditValue={setEditValue}
-                              editInputRef={editInputRef}
-                              toggleTask={toggleTask}
-                              startEditTask={startEditTask}
-                              saveEditTask={saveEditTask}
-                              handleEditKeyDown={handleEditKeyDown}
-                              deleteTask={deleteTask}
-                              formatDate={formatDate}
-                            />
-                          ))}
-                        </ul>
-                      </SortableContext>
+                      {/* Active Tasks */}
+                      {activeTasks.length > 0 && (
+                        <SortableContext
+                          items={activeTasks.map(t => t.id)}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          <ul className="divide-y divide-white/5">
+                            {activeTasks.map((task) => (
+                              <SortableTask
+                                key={task.id}
+                                task={task}
+                                editingId={editingId}
+                                editValue={editValue}
+                                setEditValue={setEditValue}
+                                editInputRef={editInputRef}
+                                toggleTask={toggleTask}
+                                startEditTask={startEditTask}
+                                saveEditTask={saveEditTask}
+                                handleEditKeyDown={handleEditKeyDown}
+                                deleteTask={deleteTask}
+                                formatDate={formatDate}
+                              />
+                            ))}
+                          </ul>
+                        </SortableContext>
+                      )}
+
+                      {/* Completed Divider + Section */}
+                      {completedTasks.length > 0 && !preferences.hideCompleted && (
+                        <>
+                          <div className="flex items-center gap-3 px-4 py-2.5">
+                            <div className="flex-1 h-px bg-white/10" />
+                            <span className="text-xs text-white/40 font-medium">
+                              Completed ({completedTasks.length})
+                            </span>
+                            <div className="flex-1 h-px bg-white/10" />
+                          </div>
+                          <SortableContext
+                            items={completedTasks.map(t => t.id)}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <ul className="divide-y divide-white/5">
+                              {completedTasks.map((task) => (
+                                <SortableTask
+                                  key={task.id}
+                                  task={task}
+                                  editingId={editingId}
+                                  editValue={editValue}
+                                  setEditValue={setEditValue}
+                                  editInputRef={editInputRef}
+                                  toggleTask={toggleTask}
+                                  startEditTask={startEditTask}
+                                  saveEditTask={saveEditTask}
+                                  handleEditKeyDown={handleEditKeyDown}
+                                  deleteTask={deleteTask}
+                                  formatDate={formatDate}
+                                />
+                              ))}
+                            </ul>
+                          </SortableContext>
+                        </>
+                      )}
                     </DndContext>
                   )}
                 </div>
