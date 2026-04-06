@@ -13,7 +13,8 @@ import {
   Check,
   X,
   Edit,
-  Grip
+  Grip,
+  Github
 } from 'lucide-react';
 import {
   DndContext,
@@ -495,6 +496,16 @@ function App() {
           </div>
         </section>
       </main>
+      {/* GitHub Link */}
+      <a
+        href="https://github.com/1shanpanta"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-5 right-5 flex h-10 w-10 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 transition-colors"
+        title="GitHub"
+      >
+        <Github className="h-5 w-5 text-white/60 hover:text-white transition-colors" />
+      </a>
     </div>
   );
 }
